@@ -30,6 +30,8 @@ def run_api_server(host: str = "0.0.0.0", port: int = 5000) -> None:
         aggregate_type = data.get("aggregate_type", "gravel")
         slump = data.get("slump", 80)
         assumed_weight = data.get("assumed_weight", 2400.0)
+        sand_moisture = data.get("sand_moisture", 0.0)
+        gravel_moisture = data.get("gravel_moisture", 0.0)
 
         try:
             calc = ConcreteMixCalculator(
@@ -38,7 +40,11 @@ def run_api_server(host: str = "0.0.0.0", port: int = 5000) -> None:
                 slump=slump,
                 assumed_weight=assumed_weight,
             )
-            result = calc.calculate(strength_grade)
+            result = calc.calculate(
+                strength_grade,
+                sand_moisture=sand_moisture,
+                gravel_moisture=gravel_moisture,
+            )
             return jsonify({"code": 0, "message": "success", "data": result.to_dict()})
         except ValueError as e:
             return jsonify({"code": 1, "message": str(e)}), 400
@@ -78,10 +84,16 @@ def run_cli(
     strength_grade: str,
     output_format: str = "text",
     cement_strength: float = 42.5,
+    sand_moisture: float = 0.0,
+    gravel_moisture: float = 0.0,
 ) -> None:
     calculator = ConcreteMixCalculator(cement_strength=cement_strength)
     try:
-        result = calculator.calculate(strength_grade)
+        result = calculator.calculate(
+            strength_grade,
+            sand_moisture=sand_moisture,
+            gravel_moisture=gravel_moisture,
+        )
         if output_format == "json":
             print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
         else:
@@ -112,13 +124,31 @@ def main():
         default=42.5,
         help="水泥标号强度，如 32.5, 42.5, 52.5 (默认: 42.5)",
     )
+    cli_parser.add_argument(
+        "--sand-moisture",
+        type=float,
+        default=0.0,
+        help="砂含水率(%%)，如 3.5 表示 3.5%% (默认: 0)",
+    )
+    cli_parser.add_argument(
+        "--gravel-moisture",
+        type=float,
+        default=0.0,
+        help="石含水率(%%)，如 1.0 表示 1.0%% (默认: 0)",
+    )
 
     args = parser.parse_args()
 
     if args.command == "api":
         run_api_server(host=args.host, port=args.port)
     elif args.command == "calc":
-        run_cli(args.grade, output_format=args.format, cement_strength=args.cement)
+        run_cli(
+            args.grade,
+            output_format=args.format,
+            cement_strength=args.cement,
+            sand_moisture=args.sand_moisture,
+            gravel_moisture=args.gravel_moisture,
+        )
     else:
         parser.print_help()
 

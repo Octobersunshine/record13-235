@@ -3,6 +3,41 @@ from typing import Dict, List, Optional
 
 
 @dataclass
+class MoistureCorrection:
+    sand_moisture_pct: float
+    gravel_moisture_pct: float
+    sand_water: float
+    gravel_water: float
+    adjusted_sand: float
+    adjusted_gravel: float
+    adjusted_water: float
+
+    def to_dict(self) -> Dict:
+        return {
+            "sand_moisture_pct": round(self.sand_moisture_pct, 1),
+            "gravel_moisture_pct": round(self.gravel_moisture_pct, 1),
+            "sand_water": round(self.sand_water, 1),
+            "gravel_water": round(self.gravel_water, 1),
+            "adjusted_sand": round(self.adjusted_sand, 1),
+            "adjusted_gravel": round(self.adjusted_gravel, 1),
+            "adjusted_water": round(self.adjusted_water, 1),
+        }
+
+    def __str__(self) -> str:
+        return (
+            f"  含水校正:\n"
+            f"    砂含水率: {self.sand_moisture_pct:.1f}%  →  "
+            f"砂中含水量: {self.sand_water:.1f} kg/m³  →  "
+            f"校正后湿砂: {self.adjusted_sand:.1f} kg/m³\n"
+            f"    石含水率: {self.gravel_moisture_pct:.1f}%  →  "
+            f"石中含水量: {self.gravel_water:.1f} kg/m³  →  "
+            f"校正后湿石: {self.adjusted_gravel:.1f} kg/m³\n"
+            f"    校正后用水量: {self.adjusted_water:.1f} kg/m³ "
+            f"(原用水量扣除砂石含水)"
+        )
+
+
+@dataclass
 class MixResult:
     cement: float
     sand: float
@@ -13,9 +48,10 @@ class MixResult:
     total_weight: float
     cement_grade: str
     warnings: List[str] = field(default_factory=list)
+    moisture_correction: Optional[MoistureCorrection] = None
 
     def to_dict(self) -> Dict:
-        return {
+        result = {
             "cement": round(self.cement, 1),
             "sand": round(self.sand, 1),
             "gravel": round(self.gravel, 1),
@@ -25,7 +61,18 @@ class MixResult:
             "design_strength": self.design_strength,
             "cement_grade": self.cement_grade,
             "warnings": self.warnings if self.warnings else None,
+            "moisture_correction": (
+                self.moisture_correction.to_dict()
+                if self.moisture_correction
+                else None
+            ),
         }
+        if self.moisture_correction:
+            mc = self.moisture_correction
+            result["adjusted_sand"] = round(mc.adjusted_sand, 1)
+            result["adjusted_gravel"] = round(mc.adjusted_gravel, 1)
+            result["adjusted_water"] = round(mc.adjusted_water, 1)
+        return result
 
     def __str__(self) -> str:
         lines = [
@@ -39,6 +86,8 @@ class MixResult:
             f"  比例: 水泥:砂:石:水 = 1 : {self.sand/self.cement:.2f} : "
             f"{self.gravel/self.cement:.2f} : {self.water/self.cement:.2f}",
         ]
+        if self.moisture_correction:
+            lines.append(str(self.moisture_correction))
         if self.warnings:
             lines.append("  注意事项:")
             for w in self.warnings:
@@ -173,7 +222,12 @@ class ConcreteMixCalculator:
         else:
             return 550
 
-    def calculate(self, strength_grade: str) -> MixResult:
+    def calculate(
+        self,
+        strength_grade: str,
+        sand_moisture: float = 0.0,
+        gravel_moisture: float = 0.0,
+    ) -> MixResult:
         strength_grade = strength_grade.upper()
         if strength_grade not in self.STRENGTH_MAP:
             raise ValueError(
@@ -244,6 +298,40 @@ class ConcreteMixCalculator:
 
         total_weight = cement + sand + gravel + water
 
+        moisture_correction = None
+        if sand_moisture > 0 or gravel_moisture > 0:
+            if sand_moisture < 0 or sand_moisture > 15:
+                raise ValueError(
+                    f"砂含水率不合理: {sand_moisture}%，有效范围: 0~15%"
+                )
+            if gravel_moisture < 0 or gravel_moisture > 10:
+                raise ValueError(
+                    f"石含水率不合理: {gravel_moisture}%，有效范围: 0~10%"
+                )
+
+            sand_water = sand * sand_moisture / 100.0
+            gravel_water = gravel * gravel_moisture / 100.0
+            adjusted_sand = sand + sand_water
+            adjusted_gravel = gravel + gravel_water
+            adjusted_water = water - sand_water - gravel_water
+
+            if adjusted_water < 0:
+                warnings.append(
+                    f"砂石含水量 ({sand_water + gravel_water:.1f} kg/m³) "
+                    f"超过设计用水量 ({water:.1f} kg/m³)，请核实含水率数据"
+                )
+                adjusted_water = 0.0
+
+            moisture_correction = MoistureCorrection(
+                sand_moisture_pct=sand_moisture,
+                gravel_moisture_pct=gravel_moisture,
+                sand_water=sand_water,
+                gravel_water=gravel_water,
+                adjusted_sand=adjusted_sand,
+                adjusted_gravel=adjusted_gravel,
+                adjusted_water=adjusted_water,
+            )
+
         return MixResult(
             cement=cement,
             sand=sand,
@@ -254,6 +342,7 @@ class ConcreteMixCalculator:
             total_weight=total_weight,
             cement_grade=self.cement_grade,
             warnings=warnings,
+            moisture_correction=moisture_correction,
         )
 
 
@@ -261,10 +350,16 @@ def get_concrete_mix(
     strength_grade: str,
     cement_strength: float = 42.5,
     aggregate_type: str = "gravel",
+    sand_moisture: float = 0.0,
+    gravel_moisture: float = 0.0,
 ) -> Dict:
     calculator = ConcreteMixCalculator(
         cement_strength=cement_strength,
         aggregate_type=aggregate_type,
     )
-    result = calculator.calculate(strength_grade)
+    result = calculator.calculate(
+        strength_grade,
+        sand_moisture=sand_moisture,
+        gravel_moisture=gravel_moisture,
+    )
     return result.to_dict()
