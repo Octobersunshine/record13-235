@@ -74,8 +74,12 @@ def run_api_server(host: str = "0.0.0.0", port: int = 5000) -> None:
     app.run(host=host, port=port)
 
 
-def run_cli(strength_grade: str, output_format: str = "text") -> None:
-    calculator = ConcreteMixCalculator()
+def run_cli(
+    strength_grade: str,
+    output_format: str = "text",
+    cement_strength: float = 42.5,
+) -> None:
+    calculator = ConcreteMixCalculator(cement_strength=cement_strength)
     try:
         result = calculator.calculate(strength_grade)
         if output_format == "json":
@@ -102,13 +106,19 @@ def main():
         default="text",
         help="输出格式",
     )
+    cli_parser.add_argument(
+        "--cement",
+        type=float,
+        default=42.5,
+        help="水泥标号强度，如 32.5, 42.5, 52.5 (默认: 42.5)",
+    )
 
     args = parser.parse_args()
 
     if args.command == "api":
         run_api_server(host=args.host, port=args.port)
     elif args.command == "calc":
-        run_cli(args.grade, output_format=args.format)
+        run_cli(args.grade, output_format=args.format, cement_strength=args.cement)
     else:
         parser.print_help()
 
